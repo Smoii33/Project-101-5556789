@@ -1,95 +1,286 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Object Classifier</title>
+    <title>Smart Office Assistant: Object Classifier</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; }
-        #webcam-container { margin: 10px auto; }
-        .controls { margin-bottom: 10px; }
-        button { padding: 8px 15px; margin: 3px; }
-        .info { margin-top: 10px; }
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap'); /* ใช้ Font Kanit */
+
+        body {
+            font-family: 'Kanit', sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(to right, #ece9e6, #ffffff); /* ไล่สีพื้นหลัง */
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #007bff;
+            font-weight: 600;
+            margin-bottom: 20px;
+            font-size: 2.2em;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        button:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
+        }
+        button.stop-btn {
+            background-color: #dc3545;
+        }
+        button.stop-btn:hover {
+            background-color: #c82333;
+        }
+        #webcam-container {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            margin: 20px auto;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            overflow: hidden;
+            background-color: #f8f9fa;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+            display: block; /* ลบช่องว่างใต้ canvas */
+        }
+        .prediction-section {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .prediction-card {
+            background-color: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            flex: 1 1 calc(33% - 40px); /* 3 คอลัมน์สำหรับ desktop */
+            min-width: 250px; /* ขั้นต่ำสำหรับ mobile */
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            text-align: left;
+        }
+        .prediction-card h3 {
+            color: #28a745;
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 1.4em;
+            font-weight: 600;
+        }
+        .prediction-card p {
+            margin: 5px 0;
+            font-size: 1.1em;
+            color: #555;
+        }
+        .prediction-card .count {
+            font-size: 1.8em;
+            font-weight: 600;
+            color: #007bff;
+        }
+        .status-message {
+            font-size: 1.2em;
+            margin-top: 20px;
+            color: #666;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .prediction-card {
+                flex: 1 1 calc(50% - 20px); /* 2 คอลัมน์สำหรับ tablet */
+            }
+        }
+        @media (max-width: 480px) {
+            .prediction-card {
+                flex: 1 1 100%; /* 1 คอลัมน์สำหรับ mobile */
+            }
+            button {
+                width: calc(100% - 10px);
+                margin: 5px 0;
+            }
+        }
     </style>
 </head>
 <body>
-    <h1>Smart Office Classifier</h1>
-    <div class="controls">
-        <button onclick="init('environment')">Start</button>
-        <button onclick="stop()">Stop</button>
-    </div>
-    <div id="webcam-container"></div>
-    <div class="info">
-        <div id="status-label">Ready.</div>
-        <div id="counts">
-            Pen: <span id="pen-count">0</span> |
-            Pencil: <span id="pencil-count">0</span> |
-            Eraser: <span id="eraser-count">0</span>
+    <div class="container">
+        <h1>Smart Office Assistant: Object Classifier</h1>
+        <p class="status-message">ระบบจำแนกและนับจำนวนอุปกรณ์สำนักงานอัตโนมัติ 📍 **Mae Klong, Samut Songkhram**</p>
+
+        <div class="controls">
+            <button type="button" onclick="init('environment')">▶️ Start (กล้องหลัง)</button>
+            <button type="button" onclick="init('user')">🤳 Start (กล้องหน้า)</button>
+            <button type="button" class="stop-btn" onclick="stop()">⏹️ Stop</button>
+        </div>
+
+        <div id="webcam-container"></div>
+        
+        <div class="prediction-section">
+            <div class="prediction-card">
+                <h3>สถานะปัจจุบัน</h3>
+                <p id="current-object-label">รอการจำแนก...</p>
+            </div>
+            <div class="prediction-card">
+                <h3>จำนวนปากกา</h3>
+                <p class="count" id="pen-count">0</p>
+            </div>
+            <div class="prediction-card">
+                <h3>จำนวนดินสอ</h3>
+                <p class="count" id="pencil-count">0</p>
+            </div>
+            <div class="prediction-card">
+                <h3>จำนวนยางลบ</h3>
+                <p class="count" id="eraser-count">0</p>
+            </div>
         </div>
     </div>
 
-    <script>
-        const URL = "https://teachablemachine.withgoogle.com/models/c0b1jfmcI/";
-        let model, webcam, maxPredictions;
-        let mqttClient;
-        let previous_class = "Empty";
-        let pen_count = 0, pencil_count = 0, eraser_count = 0;
+    <script type="text/javascript">
+        // URL ของโมเดล Teachable Machine ของคุณ
+        const URL = "https://teachablemachine.withgoogle.com/models/c0b1jfmcI/"; // ตรวจสอบให้แน่ใจว่าเป็น URL ที่ถูกต้อง
 
-        const statusLabel = document.getElementById("status-label");
+        let model, webcam, maxPredictions;
+        let mqttClient; // เพิ่มตัวแปรสำหรับ MQTT Client
+        let previous_class = "Empty"; // สถานะคลาสที่ตรวจจับได้ครั้งล่าสุด
+        let pen_count = 0;
+        let pencil_count = 0;
+        let eraser_count = 0;
+
+        // Element สำหรับแสดงผล
+        const currentObjectLabel = document.getElementById("current-object-label");
         const penCountElem = document.getElementById("pen-count");
         const pencilCountElem = document.getElementById("pencil-count");
         const eraserCountElem = document.getElementById("eraser-count");
 
+        // กำหนดค่า MQTT Broker
         const MQTT_BROKER = "broker.hivemq.com";
-        const MQTT_PORT = 8000;
-        const MQTT_TOPIC_PREFIX = "smart_office/";
+        const MQTT_PORT = 8000; // ใช้ Port 8000 สำหรับ WebSocket
+        const MQTT_TOPIC_PREFIX = "smart_office_assistant/"; // Topic Prefix สำหรับโปรเจกต์นี้
 
+        // ฟังก์ชันเชื่อมต่อ MQTT
         function connectMqtt() {
-            mqttClient = mqtt.connect(`ws://${MQTT_BROKER}:${MQTT_PORT}/mqtt`);
-            mqttClient.on('connect', () => { console.log("MQTT Connected"); });
-            mqttClient.on('error', (err) => { console.error("MQTT Error:", err); });
+            if (mqttClient && mqttClient.connected) {
+                console.log("MQTT Client already connected.");
+                return;
+            }
+            console.log("Attempting to connect to MQTT broker...");
+            mqttClient = mqtt.connect(`ws://${MQTT_BROKER}:${MQTT_PORT}/mqtt`); // เชื่อมต่อผ่าน WebSocket
+
+            mqttClient.on('connect', function () {
+                console.log("Connected to MQTT Broker!");
+                // ไม่ต้อง subscribe อะไร เพราะเราแค่ publish
+            });
+
+            mqttClient.on('error', function (err) {
+                console.error("MQTT Connection error:", err);
+                currentObjectLabel.innerText = "MQTT Error: " + err.message;
+            });
+
+            mqttClient.on('close', function () {
+                console.log("MQTT connection closed.");
+            });
+
+            mqttClient.on('reconnect', function () {
+                console.log("MQTT reconnecting...");
+            });
         }
 
+        // ฟังก์ชัน Publish ข้อมูลผ่าน MQTT
         function publishMqtt(topic, message) {
             if (mqttClient && mqttClient.connected) {
                 mqttClient.publish(MQTT_TOPIC_PREFIX + topic, String(message));
+                console.log(`Published to ${MQTT_TOPIC_PREFIX}${topic}: ${message}`);
+            } else {
+                console.warn("MQTT Client not connected. Cannot publish message.");
             }
         }
 
-        async function init() {
-            if (webcam && webcam.canvas) stop();
+        async function init(facingMode) {
+            // หยุด webcam เก่าถ้ามี
+            if (webcam && webcam.canvas) {
+                stop();
+            }
+
             const modelURL = URL + "model.json";
             const metadataURL = URL + "metadata.json";
+
             try {
                 model = await tmImage.load(modelURL, metadataURL);
                 maxPredictions = model.getTotalClasses();
-                webcam = new tmImage.Webcam(224, 224, false);
-                await webcam.setup({ facingMode: 'environment' });
+            } catch (e) {
+                console.error("Failed to load model:", e);
+                currentObjectLabel.innerText = "Error loading model. Check URL or network.";
+                return;
+            }
+
+            webcam = new tmImage.Webcam(224, 224, false); // ใช้ 224x224 เหมือนเดิม
+            try {
+                await webcam.setup({ facingMode: facingMode });
                 await webcam.play();
-                document.getElementById("webcam-container").innerHTML = '';
+                if (!webcam.canvas) {
+                    throw new Error("Webcam canvas is not initialized");
+                }
+                console.log("Webcam initialized, facingMode:", facingMode);
+                document.getElementById("webcam-container").innerHTML = ''; // Clear previous webcam
                 document.getElementById("webcam-container").appendChild(webcam.canvas);
                 window.requestAnimationFrame(loop);
-                connectMqtt();
-                resetState();
-                statusLabel.innerText = "Camera ready.";
+                connectMqtt(); // เชื่อมต่อ MQTT เมื่อ Webcam พร้อม
             } catch (e) {
-                statusLabel.innerText = "Error: " + e.message;
+                console.error("Webcam setup failed:", e);
+                currentObjectLabel.innerText = "Error: " + e.message + ". Please ensure camera access.";
+                return;
             }
+
+            // รีเซ็ตค่าการนับเมื่อเริ่มต้นใหม่
+            pen_count = 0;
+            pencil_count = 0;
+            eraser_count = 0;
+            previous_class = "Empty"; // สมมติว่าเริ่มต้นไม่มีอะไรอยู่
+            updateCountsDisplay();
+            currentObjectLabel.innerText = "กล้องพร้อมใช้งาน...";
         }
 
         async function loop() {
+            if (!webcam || !webcam.canvas) return; // ตรวจสอบว่า webcam ยังทำงานอยู่
             webcam.update();
             await predict();
             window.requestAnimationFrame(loop);
         }
 
         async function predict() {
+            if (!model || !webcam || !webcam.canvas) return;
+
             const prediction = await model.predict(webcam.canvas);
-            let current_class_name = "Empty";
+            let current_class_name = "Unknown";
             let maxProb = 0;
 
+            // ค้นหาคลาสที่มีความน่าจะเป็นสูงสุด
             for (let i = 0; i < maxPredictions; i++) {
                 if (prediction[i].probability > maxProb) {
                     maxProb = prediction[i].probability;
@@ -97,21 +288,46 @@
                 }
             }
 
-            if (current_class_name !== previous_class && maxProb > 0.8) {
+            // อัปเดต UI แสดงคลาสปัจจุบัน
+            currentObjectLabel.innerText = `${current_class_name} (${(maxProb * 100).toFixed(1)}%)`;
+
+            // Logic สำหรับการนับเพิ่ม/ลด
+            if (current_class_name !== previous_class) { // ตรวจสอบการเปลี่ยนแปลงคลาส
+                // ตรวจสอบว่ามีการเพิ่มวัตถุ
                 if (current_class_name !== "Empty" && previous_class === "Empty") {
-                    if (current_class_name === "Pen") pen_count++;
-                    else if (current_class_name === "Pencil") pencil_count++;
-                    else if (current_class_name === "Eraser") eraser_count++;
-                    publishMqtt("object_added", current_class_name);
-                } else if (current_class_name === "Empty" && previous_class !== "Empty") {
-                    if (previous_class === "Pen" && pen_count > 0) pen_count--;
-                    else if (previous_class === "Pencil" && pencil_count > 0) pencil_count--;
-                    else if (previous_class === "Eraser" && eraser_count > 0) eraser_count--;
-                    publishMqtt("object_removed", previous_class);
+                    if (current_class_name === "Pen") {
+                        pen_count++;
+                        publishMqtt("pen_added", 1); // ส่งแจ้งเตือนว่า Pen ถูกเพิ่ม
+                    } else if (current_class_name === "Pencil") {
+                        pencil_count++;
+                        publishMqtt("pencil_added", 1);
+                    } else if (current_class_name === "Eraser") {
+                        eraser_count++;
+                        publishMqtt("eraser_added", 1);
+                    }
+                    publishMqtt("current_object", current_class_name); // ส่งคลาสปัจจุบัน
                 }
-                statusLabel.innerText = "Detected: " + current_class_name;
-                updateCountsDisplay();
-                previous_class = current_class_name;
+                // ตรวจสอบว่ามีการนำวัตถุออก
+                else if (current_class_name === "Empty" && previous_class !== "Empty") {
+                    if (previous_class === "Pen" && pen_count > 0) { // ต้องแน่ใจว่านับได้มากกว่า 0 ก่อนลบ
+                        pen_count--;
+                        publishMqtt("pen_removed", 1); // ส่งแจ้งเตือนว่า Pen ถูกนำออก
+                    } else if (previous_class === "Pencil" && pencil_count > 0) {
+                        pencil_count--;
+                        publishMqtt("pencil_removed", 1);
+                    } else if (previous_class === "Eraser" && eraser_count > 0) {
+                        eraser_count--;
+                        publishMqtt("eraser_removed", 1);
+                    }
+                    publishMqtt("current_object", "Empty"); // ส่งคลาสปัจจุบัน
+                }
+
+                updateCountsDisplay(); // อัปเดตการแสดงผลตัวเลข
+                publishMqtt("inventory/pen", pen_count);
+                publishMqtt("inventory/pencil", pencil_count);
+                publishMqtt("inventory/eraser", eraser_count);
+                
+                previous_class = current_class_name; // อัปเดตสถานะล่าสุด
             }
         }
 
@@ -120,20 +336,23 @@
             pencilCountElem.innerText = pencil_count;
             eraserCountElem.innerText = eraser_count;
         }
-        
-        function resetState() {
+
+        function stop() {
+            if (webcam) {
+                webcam.stop();
+                document.getElementById("webcam-container").innerHTML = '';
+                currentObjectLabel.innerText = "หยุดการทำงาน";
+            }
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.end();
+                console.log("MQTT Client disconnected.");
+            }
+            // รีเซ็ตการนับและสถานะ
             pen_count = 0;
             pencil_count = 0;
             eraser_count = 0;
             previous_class = "Empty";
             updateCountsDisplay();
-        }
-
-        function stop() {
-            if (webcam) webcam.stop();
-            if (mqttClient) mqttClient.end();
-            document.getElementById("webcam-container").innerHTML = '';
-            statusLabel.innerText = "Stopped.";
         }
     </script>
 </body>
