@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Object Classifier</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; }
+        #webcam-container { margin: 10px auto; }
+        .controls { margin-bottom: 10px; }
+        button { padding: 8px 15px; margin: 3px; }
+        .info { margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Smart Office Classifier</h1>
+    <div class="controls">
+        <button onclick="init('environment')">Start</button>
+        <button onclick="stop()">Stop</button>
+    </div>
+    <div id="webcam-container"></div>
+    <div class="info">
+        <div id="status-label">Ready.</div>
+        <div id="counts">
+            Pen: <span id="pen-count">0</span> |
+            Pencil: <span id="pencil-count">0</span> |
+            Eraser: <span id="eraser-count">0</span>
+        </div>
+    </div>
+
+    <script>
+        const URL = "https://teachablemachine.withgoogle.com/models/c0b1jfmcI/";
+        let model, webcam, maxPredictions;
+        let mqttClient;
+        let previous_class = "Empty";
+        let pen_count = 0, pencil_count = 0, eraser_count = 0;
+
+        const statusLabel = document.getElementById("status-label");
+        const penCountElem = document.getElementById("pen-count");
+        const pencilCountElem = document.getElementById("pencil-count");
+        const eraserCountElem = document.getElementById("eraser-count");
+
+        const MQTT_BROKER = "broker.hivemq.com";
+        const MQTT_PORT = 8000;
+        const MQTT_TOPIC_PREFIX = "smart_office/";
+
+        function connectMqtt() {
+            mqttClient = mqtt.connect(`ws://${MQTT_BROKER}:${MQTT_PORT}/mqtt`);
+            mqttClient.on('connect', () => { console.log("MQTT Connected"); });
+            mqttClient.on('error', (err) => { console.error("MQTT Error:", err); });
+        }
+
+        function publishMqtt(topic, message) {
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.publish(MQTT_TOPIC_PREFIX + topic, String(message));
+            }
+        }
+
+        async function init() {
+            if (webcam && webcam.canvas) stop();
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+            try {
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+                webcam = new tmImage.Webcam(224, 224, false);
+                await webcam.setup({ facingMode: 'environment' });
+                await webcam.play();
+                document.getElementById("webcam-container").innerHTML = '';
+                document.getElementById("webcam-container").appendChild(webcam.canvas);
+                window.requestAnimationFrame(loop);
+                connectMqtt();
+                resetState();
+                statusLabel.innerText = "Camera ready.";
+            } catch (e) {
+                statusLabel.innerText = "Error: " + e.message;
+            }
+        }
+
+        async function loop() {
+            webcam.update();
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+            let current_class_name = "Empty";
+            let maxProb = 0;
+
+            for (let i = 0; i < maxPredictions; i++) {
+                if (prediction[i].probability > maxProb) {
+                    maxProb = prediction[i].probability;
+                    current_class_name = prediction[i].className;
+                }
+            }
+
+            if (current_class_name !== previous_class && maxProb > 0.8) {
+                if (current_class_name !== "Empty" && previous_class === "Empty") {
+                    if (current_class_name === "Pen") pen_count++;
+                    else if (current_class_name === "Pencil") pencil_count++;
+                    else if (current_class_name === "Eraser") eraser_count++;
+                    publishMqtt("object_added", current_class_name);
+                } else if (current_class_name === "Empty" && previous_class !== "Empty") {
+                    if (previous_class === "Pen" && pen_count > 0) pen_count--;
+                    else if (previous_class === "Pencil" && pencil_count > 0) pencil_count--;
+                    else if (previous_class === "Eraser" && eraser_count > 0) eraser_count--;
+                    publishMqtt("object_removed", previous_class);
+                }
+                statusLabel.innerText = "Detected: " + current_class_name;
+                updateCountsDisplay();
+                previous_class = current_class_name;
+            }
+        }
+
+        function updateCountsDisplay() {
+            penCountElem.innerText = pen_count;
+            pencilCountElem.innerText = pencil_count;
+            eraserCountElem.innerText = eraser_count;
+        }
+        
+        function resetState() {
+            pen_count = 0;
+            pencil_count = 0;
+            eraser_count = 0;
+            previous_class = "Empty";
+            updateCountsDisplay();
+        }
+
+        function stop() {
+            if (webcam) webcam.stop();
+            if (mqttClient) mqttClient.end();
+            document.getElementById("webcam-container").innerHTML = '';
+            statusLabel.innerText = "Stopped.";
+        }
+    </script>
+</body>
+</html>
